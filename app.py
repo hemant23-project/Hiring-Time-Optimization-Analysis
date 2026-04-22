@@ -3,107 +3,233 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.linear_model import LinearRegression
 
-sns.set_theme(style="whitegrid")
+st.set_page_config(page_title="Recruitment Dashboard", layout="wide")
 
-st.title("📊 Hiring Time Optimization Dashboard")
+st.title("📊 Recruitment Analytics Dashboard")
 
-# File Upload
-file = st.file_uploader("Upload Excel File", type=["xlsx"])
+# -------------------------
+# FILE UPLOAD / DEFAULT LOAD
+# -------------------------
+st.sidebar.header("📂 Data Source")
 
-if file is not None:
-    df = pd.read_excel(file)
+uploaded_file = st.sidebar.file_uploader(
+    "Upload CSV or Excel file",
+    type=["csv", "xlsx"]
+)
 
-    st.write("### Dataset Preview")
-    st.dataframe(df.head())
+@st.cache_data
+def load_data(file):
+    if file is not None:
+        if file.name.endswith(".csv"):
+            df = pd.read_csv(file)
+        else:
+            df = pd.read_excel(file)
+    else:
+        try:
+            df = pd.read_csv("data.csv")
+            st.sidebar.success("Using default dataset")
+        except:
+            return None
 
-    # Convert dates
-    df['Application_Date'] = pd.to_datetime(df['Application_Date'])
-    df['Screening_Date'] = pd.to_datetime(df['Screening_Date'])
-    df['Interview_Date'] = pd.to_datetime(df['Interview_Date'])
-    df['Offer_Date'] = pd.to_datetime(df['Offer_Date'])
-    df['Joining_Date'] = pd.to_datetime(df['Joining_Date'])
+    # Clean column names
+    df.columns = df.columns.str.strip()
 
-    # KPIs
-    total = len(df)
-    screened = df['Screening_Date'].notna().sum()
-    interviewed = df['Interview_Date'].notna().sum()
-    offered = df['Offer_Date'].notna().sum()
-    joined = df['Joining_Date'].notna().sum()
+    # Convert date columns
+    date_cols = [
+        "Application_Date",
+        "Screening_Date",
+        "Interview_Date",
+        "Offer_Date",
+        "Joining_Date"
+    ]
 
-    st.write("## 📌 Hiring Funnel KPIs")
-    st.write(f"Total Applications: {total}")
-    st.write(f"Screened: {screened}")
-    st.write(f"Interviewed: {interviewed}")
-    st.write(f"Offered: {offered}")
-    st.write(f"Joined: {joined}")
+    for col in date_cols:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors='coerce')
 
-    # Selected Candidates
-    selected_df = df[df['Status'] == 'Selected'].copy()
+    # Create time metrics
+    if all(col in df.columns for col in date_cols):
+        df["App_to_Screen"] = (df["Screening_Date"] - df["Application_Date"]).dt.days
+        df["Screen_to_Interview"] = (df["Interview_Date"] - df["Screening_Date"]).dt.days
+        df["Interview_to_Offer"] = (df["Offer_Date"] - df["Interview_Date"]).dt.days
+        df["Offer_to_Join"] = (df["Joining_Date"] - df["Offer_Date"]).dt.days
+        df["Total_Hiring_Time"] = (df["Joining_Date"] - df["Application_Date"]).dt.days
 
-    # Time Columns
-    selected_df['Time_to_Screen'] = (selected_df['Screening_Date'] - selected_df['Application_Date']).dt.days
-    selected_df['Time_to_Interview'] = (selected_df['Interview_Date'] - selected_df['Screening_Date']).dt.days
-    selected_df['Time_to_Offer'] = (selected_df['Offer_Date'] - selected_df['Interview_Date']).dt.days
-    selected_df['Time_to_Join'] = (selected_df['Joining_Date'] - selected_df['Offer_Date']).dt.days
+    return df
 
-    selected_df['Total_Hiring_Time'] = (selected_df['Joining_Date'] - selected_df['Application_Date']).dt.days
+df = load_data(uploaded_file)
 
-    st.write("## ⏱ Hiring Time Analysis")
-    st.write("Average Hiring Time:", selected_df['Total_Hiring_Time'].mean())
+if df is None:
+    st.warning("⚠️ Please upload a dataset to proceed.")
+    st.stop()
 
-    stage_avg = selected_df[['Time_to_Screen','Time_to_Interview','Time_to_Offer','Time_to_Join']].mean()
-    st.write("Stage-wise Time:", stage_avg)
+# -------------------------
+# DATA PREVIEW
+# -------------------------
+st.subheader("👀 Dataset Preview")
+st.dataframe(df.head())
 
-    st.write("Bottleneck Stage:", stage_avg.idxmax())
+# -------------------------
+# SIDEBAR FILTERS
+# -------------------------
+st.sidebar.header("🔍 Filters")
 
-    # 📊 Charts
-    st.write("## 📊 Visualizations")
+job_roles = st.sidebar.multiselect(
+    "Job Role",
+    df["Job_Role"].dropna().unique(),
+    default=df["Job_Role"].dropna().unique()
+)
 
-    fig1, ax1 = plt.subplots()
-    sns.countplot(x='Status', data=df, ax=ax1)
-    ax1.set_title("Hiring Funnel")
-    st.pyplot(fig1)
+sources = st.sidebar.multiselect(
+    "Source",
+    df["Source"].dropna().unique(),
+    default=df["Source"].dropna().unique()
+)
 
-    fig2, ax2 = plt.subplots()
-    sns.histplot(selected_df['Total_Hiring_Time'], kde=True, ax=ax2)
-    ax2.set_title("Hiring Time Distribution")
-    st.pyplot(fig2)
+recruiters = st.sidebar.multiselect(
+    "Recruiter",
+    df["Recruiter_ID"].dropna().unique(),
+    default=df["Recruiter_ID"].dropna().unique()
+)
 
-    fig3, ax3 = plt.subplots()
-    sns.boxplot(x='Job_Role', y='Total_Hiring_Time', data=selected_df, ax=ax3)
+date_range = st.sidebar.date_input(
+    "Application Date Range",
+    [df["Application_Date"].min(), df["Application_Date"].max()]
+)
+
+# Apply filters
+filtered_df = df[
+    (df["Job_Role"].isin(job_roles)) &
+    (df["Source"].isin(sources)) &
+    (df["Recruiter_ID"].isin(recruiters)) &
+    (df["Application_Date"] >= pd.to_datetime(date_range[0])) &
+    (df["Application_Date"] <= pd.to_datetime(date_range[1]))
+]
+
+# -------------------------
+# KPI METRICS
+# -------------------------
+st.subheader("📌 Key Metrics")
+
+col1, col2, col3 = st.columns(3)
+
+col1.metric("Total Candidates", len(filtered_df))
+
+if "Total_Hiring_Time" in filtered_df.columns:
+    col2.metric("Avg Hiring Time", round(filtered_df["Total_Hiring_Time"].mean(), 2))
+
+if "Offer_to_Join" in filtered_df.columns:
+    col3.metric("Offer → Join Time", round(filtered_df["Offer_to_Join"].mean(), 2))
+
+# -------------------------
+# VISUALIZATIONS
+# -------------------------
+st.subheader("📈 Visual Insights")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.write("### Hiring Time by Role")
+    fig, ax = plt.subplots()
+    sns.barplot(data=filtered_df, x="Job_Role", y="Total_Hiring_Time", ax=ax)
     plt.xticks(rotation=45)
-    st.pyplot(fig3)
+    st.pyplot(fig)
 
-    fig4, ax4 = plt.subplots()
-    sns.barplot(x='Source', y='Total_Hiring_Time', data=selected_df, ax=ax4)
-    plt.xticks(rotation=45)
-    st.pyplot(fig4)
+with col2:
+    st.write("### Source Distribution")
+    fig, ax = plt.subplots()
+    filtered_df["Source"].value_counts().plot.pie(autopct="%1.1f%%", ax=ax)
+    st.pyplot(fig)
 
-    # Trend
-    selected_df['Month'] = selected_df['Application_Date'].dt.month
+# -------------------------
+# FUNNEL ANALYSIS
+# -------------------------
+st.subheader("⏳ Hiring Funnel Analysis")
 
-    fig5, ax5 = plt.subplots()
-    sns.lineplot(x='Month', y='Total_Hiring_Time', data=selected_df, ax=ax5)
-    st.pyplot(fig5)
+stage_cols = [
+    "App_to_Screen",
+    "Screen_to_Interview",
+    "Interview_to_Offer",
+    "Offer_to_Join"
+]
 
-    # ML
-    from sklearn.model_selection import train_test_split
-    from sklearn.linear_model import LinearRegression
-    from sklearn.metrics import mean_absolute_error, r2_score
+if all(col in filtered_df.columns for col in stage_cols):
+    stage_avg = filtered_df[stage_cols].mean()
+    st.bar_chart(stage_avg)
 
-    ml_df = selected_df.dropna()
+# -------------------------
+# RECRUITER PERFORMANCE
+# -------------------------
+st.subheader("👥 Recruiter Performance")
 
-    X = ml_df[['Time_to_Screen','Time_to_Interview','Time_to_Offer','Time_to_Join']]
-    y = ml_df['Total_Hiring_Time']
+if "Total_Hiring_Time" in filtered_df.columns:
+    recruiter_perf = filtered_df.groupby("Recruiter_ID")["Total_Hiring_Time"].mean().reset_index()
+    st.dataframe(recruiter_perf)
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+# -------------------------
+# DATA TABLE
+# -------------------------
+st.subheader("📄 Filtered Data")
+st.dataframe(filtered_df)
+
+# -------------------------
+# PREDICTION
+# -------------------------
+st.subheader("🤖 Hiring Time Prediction")
+
+model_df = filtered_df.dropna(subset=["Total_Hiring_Time"])
+
+if len(model_df) > 2:
+    X = pd.get_dummies(model_df[["Job_Role", "Source", "Recruiter_ID"]])
+    y = model_df["Total_Hiring_Time"]
 
     model = LinearRegression()
-    model.fit(X_train, y_train)
+    model.fit(X, y)
 
-    y_pred = model.predict(X_test)
+    st.write("### Predict Hiring Time")
 
-    st.write("## 🤖 Model Performance")
-    st.write("MAE:", mean_absolute_error(y_test, y_pred))
-    st.write("R2 Score:", r2_score(y_test, y_pred))
+    role_input = st.selectbox("Job Role", df["Job_Role"].unique())
+    source_input = st.selectbox("Source", df["Source"].unique())
+    recruiter_input = st.selectbox("Recruiter", df["Recruiter_ID"].unique())
+
+    input_df = pd.DataFrame({
+        "Job_Role": [role_input],
+        "Source": [source_input],
+        "Recruiter_ID": [recruiter_input]
+    })
+
+    input_encoded = pd.get_dummies(input_df)
+    input_encoded = input_encoded.reindex(columns=X.columns, fill_value=0)
+
+    prediction = model.predict(input_encoded)
+
+    st.success(f"Estimated Hiring Time: {round(prediction[0], 2)} days")
+
+else:
+    st.info("Not enough data for prediction")
+
+# -------------------------
+# INSIGHTS
+# -------------------------
+st.subheader("🧠 Insights")
+
+if "Total_Hiring_Time" in filtered_df.columns:
+    avg_time = round(filtered_df["Total_Hiring_Time"].mean(), 1)
+
+    if all(col in filtered_df.columns for col in stage_cols):
+        stage_avg = filtered_df[stage_cols].mean()
+        fastest = stage_avg.idxmin()
+        slowest = stage_avg.idxmax()
+    else:
+        fastest, slowest = "N/A", "N/A"
+
+    top_source = filtered_df["Source"].value_counts().idxmax()
+
+    st.write(f"""
+    - 📌 Average hiring time: **{avg_time} days**
+    - ⚡ Fastest stage: **{fastest}**
+    - 🐢 Slowest stage: **{slowest}**
+    - 🎯 Top candidate source: **{top_source}**
+    """)
