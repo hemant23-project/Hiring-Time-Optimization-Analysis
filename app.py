@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.linear_model import LinearRegression
@@ -22,14 +21,16 @@ uploaded_file = st.sidebar.file_uploader(
 @st.cache_data
 def load_data(file):
     if file is not None:
+        # User uploaded file
         if file.name.endswith(".csv"):
             df = pd.read_csv(file)
         else:
             df = pd.read_excel(file)
     else:
+        # Default Excel file
         try:
-            df = pd.read_csv("data.csv")
-            st.sidebar.success("Using default dataset")
+            df = pd.read_excel("data.xlsx")
+            st.sidebar.success("Using default dataset (data.xlsx)")
         except:
             return None
 
@@ -62,7 +63,7 @@ def load_data(file):
 df = load_data(uploaded_file)
 
 if df is None:
-    st.warning("⚠️ Please upload a dataset to proceed.")
+    st.warning("⚠️ Please upload a dataset or place 'data.xlsx' in the app folder.")
     st.stop()
 
 # -------------------------
@@ -124,7 +125,7 @@ if "Offer_to_Join" in filtered_df.columns:
     col3.metric("Offer → Join Time", round(filtered_df["Offer_to_Join"].mean(), 2))
 
 # -------------------------
-# VISUALIZATIONS
+# VISUALS
 # -------------------------
 st.subheader("📈 Visual Insights")
 
@@ -146,7 +147,7 @@ with col2:
 # -------------------------
 # FUNNEL ANALYSIS
 # -------------------------
-st.subheader("⏳ Hiring Funnel Analysis")
+st.subheader("⏳ Hiring Funnel")
 
 stage_cols = [
     "App_to_Screen",
@@ -156,23 +157,7 @@ stage_cols = [
 ]
 
 if all(col in filtered_df.columns for col in stage_cols):
-    stage_avg = filtered_df[stage_cols].mean()
-    st.bar_chart(stage_avg)
-
-# -------------------------
-# RECRUITER PERFORMANCE
-# -------------------------
-st.subheader("👥 Recruiter Performance")
-
-if "Total_Hiring_Time" in filtered_df.columns:
-    recruiter_perf = filtered_df.groupby("Recruiter_ID")["Total_Hiring_Time"].mean().reset_index()
-    st.dataframe(recruiter_perf)
-
-# -------------------------
-# DATA TABLE
-# -------------------------
-st.subheader("📄 Filtered Data")
-st.dataframe(filtered_df)
+    st.bar_chart(filtered_df[stage_cols].mean())
 
 # -------------------------
 # PREDICTION
@@ -187,8 +172,6 @@ if len(model_df) > 2:
 
     model = LinearRegression()
     model.fit(X, y)
-
-    st.write("### Predict Hiring Time")
 
     role_input = st.selectbox("Job Role", df["Job_Role"].unique())
     source_input = st.selectbox("Source", df["Source"].unique())
@@ -217,19 +200,9 @@ st.subheader("🧠 Insights")
 
 if "Total_Hiring_Time" in filtered_df.columns:
     avg_time = round(filtered_df["Total_Hiring_Time"].mean(), 1)
-
-    if all(col in filtered_df.columns for col in stage_cols):
-        stage_avg = filtered_df[stage_cols].mean()
-        fastest = stage_avg.idxmin()
-        slowest = stage_avg.idxmax()
-    else:
-        fastest, slowest = "N/A", "N/A"
-
     top_source = filtered_df["Source"].value_counts().idxmax()
 
     st.write(f"""
     - 📌 Average hiring time: **{avg_time} days**
-    - ⚡ Fastest stage: **{fastest}**
-    - 🐢 Slowest stage: **{slowest}**
-    - 🎯 Top candidate source: **{top_source}**
+    - 🎯 Top source: **{top_source}**
     """)
